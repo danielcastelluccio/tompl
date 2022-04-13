@@ -1,6 +1,8 @@
 [function.main]
+locals = ["struct"]
 instructions = [
-    { test = [4] }
+    { struct = {test_struct = {}} },
+    { test = [{struct = {}}] }
 ]
 
 [function.test] 
@@ -8,3 +10,6 @@ arguments = ["test"]
 instructions = [
     { println = [{test = {}}, " test"] }
 ]
+
+[struct.test_struct]
+value = 5
