@@ -1,0 +1,12 @@
+[function.main]
+instructions = [
+    { test = ["Hello World!"] }
+]
+
+[function.test]
+arguments = [
+    "test"
+]
+instructions = [
+    { println = ["$test"] }
+]
