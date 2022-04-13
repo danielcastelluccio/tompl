@@ -1,6 +1,6 @@
 use std::{error::Error, fs::File, io::Read, collections::HashMap};
 
-use toml::{Value, value::Array};
+use toml::Value;
 
 struct Context {
     functions: HashMap<String, Function>,
@@ -9,12 +9,14 @@ struct Context {
 struct Function {
     arguments: Vec<String>,
     locals: Vec<String>,
-    instructions: Vec<Instruction>,
+    instructions: Vec<Value>,
 }
 
-enum Instruction {
-    INVOKE(String, Value),
-    STORE(String, Value)
+#[derive(Clone)]
+enum Data {
+    String(String),
+    Integer(i64),
+    Undefined
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -53,13 +55,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let instructions = value.get("instructions").unwrap().as_array().unwrap();
         for instruction in instructions {
-            let (id, arguments) = instruction.as_table().unwrap().iter().next().unwrap();
-
-            if function.locals.contains(id) {
-                function.instructions.push(Instruction::STORE(id.clone(), arguments.clone()))
-            } else {
-                function.instructions.push(Instruction::INVOKE(id.clone(), arguments.clone()))
-            }
+            function.instructions.push(instruction.clone());
         }
 
         context.functions.insert(key.clone(), function);
@@ -71,100 +67,59 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn execute(context: &Context, function: &Function, arguments: &Array) {
-    let mut locals: HashMap<String, Value> = HashMap::new();
+fn evaluate(value: &Value, context: &Context, locals: &HashMap<String, Data>) -> Data {
+    match value {
+        Value::String(string) => Data::String(string.clone()),
+        Value::Integer(integer) => Data::Integer(*integer),
+        Value::Table(map) => {
+            let (key, value) = map.iter().next().unwrap();
+
+            if locals.contains_key(key) {
+                return locals.get(key).unwrap().clone();
+            }
+
+            if context.functions.contains_key(key) || key == "print" || key == "println" {
+                let arguments = value.as_array().unwrap().clone();
+                let arguments_new = arguments.iter().map(|argument| {
+                    evaluate(argument, context, locals)
+                }).collect();
+
+                match key.as_str() {
+                    "print" => print(&arguments_new),
+                    "println" => println(&arguments_new),
+                    _ => execute(context, context.functions.get(key).unwrap(), &arguments_new)
+                }
+            }
+
+            Data::Undefined
+        }
+        _ => Data::Undefined
+    }
+}
+
+fn execute(context: &Context, function: &Function, arguments: &Vec<Data>) {
+    let mut locals: HashMap<String, Data> = HashMap::new();
 
     for (index, argument) in arguments.iter().enumerate() {
         locals.insert(function.arguments.get(index).unwrap().clone(), argument.clone());
     }
 
     for instruction in &function.instructions {
-        match instruction {
-            Instruction::INVOKE(name, arguments) => {
-                match name.as_str() {
-                    "print" => {
-                        let mut arguments = arguments.as_array().unwrap().clone();
-                        arguments = arguments.iter().map(|argument| {
-                            if let Some(string) = argument.as_str() {
-                                if string.chars().nth(0) == Some('$') {
-                                    match locals.get(&string[1..]) {
-                                        Some(local) => {
-                                            return local.clone()
-                                        }
-                                        None => eprintln!("Local {} not found!", &string[1..])
-                                    }
-                                }
-                            }
-
-                            argument.clone()
-                        }).collect();
-
-                        print(&arguments)
-                    }
-                    "println" => {
-                        let mut arguments = arguments.as_array().unwrap().clone();
-                        arguments = arguments.iter().map(|argument| {
-                            if let Some(string) = argument.as_str() {
-                                if string.chars().nth(0) == Some('$') {
-                                    match locals.get(&string[1..]) {
-                                        Some(local) => {
-                                            return local.clone()
-                                        }
-                                        None => eprintln!("Local {} not found!", &string[1..])
-                                    }
-                                }
-                            }
-
-                            argument.clone()
-                        }).collect();
-
-                        println(&arguments)
-                    }
-                    _ => {
-                        let function = context.functions.get(name);
-
-                        let mut arguments = arguments.as_array().unwrap().clone();
-                        arguments = arguments.iter().map(|argument| {
-                            if let Some(string) = argument.as_str() {
-                                if string.chars().nth(0) == Some('$') {
-                                    match locals.get(&string[1..]) {
-                                        Some(local) => {
-                                            return local.clone()
-                                        }
-                                        None => eprintln!("Local {} not found!", &string[1..])
-                                    }
-                                }
-                            }
-
-                            argument.clone()
-                        }).collect();
-
-                        match function {
-                            Some(function) => execute(context, function, &arguments),
-                            None => eprintln!("Function {name} not defined!")
-                        }
-                    }
-                }
-            },
-            Instruction::STORE(name, value) => {
-                locals.insert(name.clone(), value.clone());
-            }
-        }
+        evaluate(instruction, context, &locals);
     }
 }
 
-fn println(arguments: &Array) {
+fn println(arguments: &Vec<Data>) {
     print(arguments);
     println!()
 }
 
-fn print(arguments: &Array) {
-    match arguments.get(0).unwrap() {
-        Value::String(string) => print!("{string}"),
-        Value::Integer(integer) => print!("{integer}"),
-        Value::Float(float) => print!("{float}"),
-        _ => {
-            eprintln!("Invalid print argument {arguments:?}!");
+fn print(arguments: &Vec<Data>) {
+    for argument in arguments {
+        match argument {
+            Data::String(string) => print!("{string}"),
+            Data::Integer(integer) => print!("{integer}"),
+            Data::Undefined => print!("undefined")
         }
     }
 }
